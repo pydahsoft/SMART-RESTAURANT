@@ -15,6 +15,7 @@ import {
   CreditCardIcon 
 } from '@heroicons/react/24/outline';
 import { PALETTE } from '../themePalette';
+import { buildApiUrl } from '../utils/config';
 
 const getStatusColor = (status) => {
   const colors = {
@@ -83,7 +84,7 @@ const WaiterDashboard = () => {
       }
 
       const response = await axios.get(
-        'http://localhost:5000/api/orders/waiter-orders',
+        buildApiUrl('/orders/waiter-orders'),
         {
           headers: {
             Authorization: `Bearer ${token}`
@@ -170,7 +171,7 @@ const WaiterDashboard = () => {
     try {
       const token = localStorage.getItem('waiterToken');
       await axios.patch(
-        `http://localhost:5000/api/orders/${orderId}/status`,
+        buildApiUrl(`/orders/${orderId}/status`),
         {
           status: newStatus,
           comment: `Order ${newStatus} by waiter`
@@ -213,7 +214,7 @@ const WaiterDashboard = () => {
       const token = localStorage.getItem('waiterToken');
       
       await axios.patch(
-        `http://localhost:5000/api/orders/${orderId}/payment`,
+        buildApiUrl(`/orders/${orderId}/payment`),
         {
           paymentMethod,
           paymentStatus: 'completed',

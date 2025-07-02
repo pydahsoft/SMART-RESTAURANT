@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { buildApiUrl } from '../utils/config';
 
 const OrderTimeline = ({ comments }) => {
   if (!comments || comments.length === 0) return null;
@@ -87,10 +88,10 @@ const Orders = () => {
         };
 
         try {
-          const profileResponse = await axios.get('http://localhost:5000/api/auth/profile', { headers });
+          const profileResponse = await axios.get(buildApiUrl('/auth/profile'), { headers });
           setUserProfile(profileResponse.data);
 
-          const ordersResponse = await axios.get('http://localhost:5000/api/orders/my-orders', { headers });
+          const ordersResponse = await axios.get(buildApiUrl('/orders/my-orders'), { headers });
           const sortedOrders = ordersResponse.data.sort((a, b) => 
             new Date(b.createdAt) - new Date(a.createdAt)
           );
@@ -161,7 +162,7 @@ const Orders = () => {
       };
 
       const { data: updatedOrder } = await axios.patch(
-        `http://localhost:5000/api/orders/${selectedOrder._id}/payment`,
+        buildApiUrl(`/orders/${selectedOrder._id}/payment`),
         {
           paymentMethod,
           paymentStatus: 'completed'
@@ -176,10 +177,7 @@ const Orders = () => {
 
       // Refresh user profile to get latest orders
       try {
-        const profileResponse = await axios.get(
-          'http://localhost:5000/api/auth/profile',
-          { headers }
-        );
+        const profileResponse = await axios.get(buildApiUrl('/auth/profile'), { headers });
         setUserProfile(profileResponse.data);
       } catch (profileError) {
         console.error('Error refreshing profile:', profileError);
@@ -594,7 +592,7 @@ const Orders = () => {
                   </svg>
                 ) : (
                   <>
-                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7h18M3 12h18m-7 5h7" />
                     </svg>
                     Pay Now

@@ -4,8 +4,9 @@ import {
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import { buildApiUrl } from '../utils/config';
 
-const API_URL = 'http://localhost:5000/api/coupons';
+const API_URL = buildApiUrl('/coupons');
 
 const defaultForm = {
   code: '',

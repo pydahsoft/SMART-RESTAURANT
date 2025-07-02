@@ -5,6 +5,7 @@ import {
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { alpha } from '@mui/material/styles';
+import { buildApiUrl } from '../utils/config';
 
 // Color constants
 const COLORS = {
@@ -19,8 +20,8 @@ const COLORS = {
   successGreen: '#4CAF50'
 };
 
-const API_ORDER = 'http://localhost:5000/api/orders/all-orders';
-const API_COUPONS = 'http://localhost:5000/api/coupons';
+const API_ORDER = buildApiUrl('/orders/all-orders');
+const API_COUPONS = buildApiUrl('/coupons');
 
 const AccountanceOrderDetail = () => {
   const { id } = useParams();
@@ -72,7 +73,7 @@ const AccountanceOrderDetail = () => {
             // Store discounted amount in DB if not already set
             const discountedAmount = Math.max(0, order.totalAmount - maxDiscount);
             if (order.discountedAmount !== discountedAmount) {
-              fetch(`http://localhost:5000/api/orders/${order._id || order.orderId}/apply-coupon`, {
+              fetch(buildApiUrl(`/orders/${order._id || order.orderId}/apply-coupon`), {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ discountedAmount, appliedCoupon: bestCoupon.code })
@@ -232,7 +233,7 @@ const AccountanceOrderDetail = () => {
                     }}
                     onClick={async () => {
                       // Update payment method and status in backend
-                      await fetch(`http://localhost:5000/api/orders/${order._id || order.orderId}/payment`, {
+                      await fetch(buildApiUrl(`/orders/${order._id || order.orderId}/payment`), {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ paymentMethod: order.paymentMethod, paymentStatus: 'completed' })

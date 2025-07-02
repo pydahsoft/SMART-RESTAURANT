@@ -45,6 +45,7 @@ import {
   Circle as CircleIcon,
 } from '@mui/icons-material';
 import { PALETTE } from '../themePalette';
+import { buildApiUrl } from '../utils/config';
 
 // Replace color values in sx and style props with PALETTE values
 // Example changes below:
@@ -73,7 +74,7 @@ const OrderDetail = () => {
   useEffect(() => {
     const fetchOrderDetails = async () => {
       try {
-        const response = await fetch(`http://localhost:5000/api/orders/public/${id}`, {
+        const response = await fetch(buildApiUrl(`/orders/public/${id}`), {
           headers: {
             'Content-Type': 'application/json',
           }
@@ -102,7 +103,7 @@ const OrderDetail = () => {
 
   const handlePayment = async () => {
     try {
-      const response = await fetch(`http://localhost:5000/api/orders/${id}/payment`, {
+      const response = await fetch(buildApiUrl(`/orders/${id}/payment`), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

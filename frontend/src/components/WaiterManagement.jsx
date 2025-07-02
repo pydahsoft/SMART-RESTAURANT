@@ -35,6 +35,7 @@ import {
   MoreVert as MoreVertIcon
 } from '@mui/icons-material';
 import axios from 'axios';
+import { buildApiUrl } from '../utils/config';
 
 const WaiterManagement = () => {
   // Updated color palette with new colors
@@ -74,7 +75,7 @@ const WaiterManagement = () => {
   // Fetch waiters from API (unchanged)
   const fetchWaiters = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/waiters');
+      const response = await axios.get(buildApiUrl('/waiters'));
       setWaiters(response.data);
     } catch (err) {
       setError('Failed to fetch waiters');
@@ -146,7 +147,7 @@ const WaiterManagement = () => {
         return;
       }
 
-      const response = await axios.post('http://localhost:5000/api/waiters/create', {
+      const response = await axios.post(buildApiUrl('/waiters/create'), {
         name: newWaiter.name.trim(),
         phoneNumber: newWaiter.phoneNumber.trim(),
         password: newWaiter.password,
@@ -207,7 +208,7 @@ const WaiterManagement = () => {
       }
 
       const response = await axios.put(
-        `http://localhost:5000/api/waiters/${editingWaiter._id}`,
+        buildApiUrl(`/waiters/${editingWaiter._id}`),
         updateData
       );
 
@@ -228,7 +229,7 @@ const WaiterManagement = () => {
 
   const handleDeleteConfirm = async () => {
     try {
-      await axios.delete(`http://localhost:5000/api/waiters/${selectedWaiter._id}`);
+      await axios.delete(buildApiUrl(`/waiters/${selectedWaiter._id}`));
       setSuccess('Waiter deleted successfully!');
       setDeleteDialogOpen(false);
       setSelectedWaiter(null);

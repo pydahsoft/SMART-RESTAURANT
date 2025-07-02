@@ -31,6 +31,7 @@ import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 import BackButton from '../components/BackButton';
 import { PALETTE } from '../themePalette';
+import { buildApiUrl } from '../utils/config';
 
 const validatePhoneNumber = (number) => {
   // Accept 10-digit phone numbers
@@ -134,7 +135,7 @@ const Cart = () => {
 
       // Place the order - this will handle authentication/registration
       const response = await axios.post(
-        'http://localhost:5000/api/orders',
+        buildApiUrl('/orders'),
         orderData
       );
 

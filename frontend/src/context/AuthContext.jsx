@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useTheme } from '@mui/material/styles';
 import axios from 'axios';
+import { buildApiUrl } from '../utils/config';
 
 const AuthContext = createContext(null);
 
@@ -34,7 +35,7 @@ export const AuthProvider = ({ children }) => {
       const token = localStorage.getItem('token');
       if (token && !user) {
         try {
-          const response = await axios.get('http://localhost:5000/api/auth/profile', {
+          const response = await axios.get(buildApiUrl('/auth/profile'), {
             headers: { Authorization: `Bearer ${token}` }
           });
           

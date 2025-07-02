@@ -29,6 +29,7 @@ import {
 } from '@mui/icons-material';
 import Divider from '@mui/material/Divider';
 import { PALETTE } from '../themePalette';
+import { buildApiUrl } from '../utils/config';
 
 // Animation
 const floatAnimation = keyframes`
@@ -92,7 +93,7 @@ const Accountance = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('http://localhost:5000/api/orders/all-orders');
+      const response = await fetch(buildApiUrl('/orders/all-orders'));
       
       if (!response.ok) {
         throw new Error(`Failed to fetch orders: ${response.status}`);

@@ -24,6 +24,7 @@ import WaiterManagement from '../components/WaiterManagement';
 import FoodManagement from './FoodManagement';
 import CouponManagement from './CouponManagement';
 import { PALETTE } from '../themePalette';
+import { buildApiUrl } from '../utils/config';
 
 // Animation keyframes
 const floatAnimation = keyframes`
@@ -402,7 +403,7 @@ const AdminDashboard = () => {
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch('http://localhost:5000/api/orders/all-orders');
+        const response = await fetch(buildApiUrl('/orders/all-orders'));
         if (!response.ok) {
           throw new Error(`Failed to fetch orders: ${response.status}`);
         }

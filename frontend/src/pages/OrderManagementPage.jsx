@@ -25,6 +25,7 @@ import {
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon
 } from '@mui/icons-material';
+import { buildApiUrl } from '../utils/config';
 
 const OrderManagementPage = () => {
   // State for orders and loading status
@@ -46,7 +47,7 @@ const OrderManagementPage = () => {
   useEffect(() => {
     const fetchOrders = async () => {
       try {
-        const response = await fetch('http://localhost:5000/api/orders/all-orders');
+        const response = await fetch(buildApiUrl('/orders/all-orders'));
 
         if (!response.ok) {
           throw new Error('Failed to fetch orders');
@@ -68,7 +69,7 @@ const OrderManagementPage = () => {
   const updateOrderStatus = async (orderId, newStatus) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:5000/api/orders/${orderId}/status`, {
+      const response = await fetch(buildApiUrl(`/orders/${orderId}/status`), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

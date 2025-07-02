@@ -31,6 +31,7 @@ import {
   Close as CloseIcon,
   Visibility as VisibilityIcon
 } from '@mui/icons-material';
+import { buildApiUrl } from '../utils/config';
 
 const ServerDashboard = () => {
   // Auth hooks
@@ -81,7 +82,7 @@ const ServerDashboard = () => {
         throw new Error('Authentication required');
       }
 
-      let url = 'http://localhost:5000/api/orders';
+      let url = buildApiUrl('/orders');
       
       if (isWaiterMode && waiterInfo?.assignedTables) {
         url += `?tables=${waiterInfo.assignedTables.join(',')}`;
@@ -130,7 +131,7 @@ const ServerDashboard = () => {
     }
 
     try {
-      const response = await fetch('http://localhost:5000/api/orders/completed', {
+      const response = await fetch(buildApiUrl('/orders/completed'), {
         headers: {
           'Authorization': `Bearer ${token}`,
         }
@@ -160,7 +161,7 @@ const ServerDashboard = () => {
         throw new Error('Authentication required');
       }
 
-      const response = await fetch(`http://localhost:5000/api/orders/${orderId}/status`, {
+      const response = await fetch(buildApiUrl(`/orders/${orderId}/status`), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -215,7 +216,7 @@ const ServerDashboard = () => {
         throw new Error('Authentication error. Please log in again.');
       }
 
-      const paymentResponse = await fetch(`http://localhost:5000/api/orders/${orderId}/payment`, {
+      const paymentResponse = await fetch(buildApiUrl(`/orders/${orderId}/payment`), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -231,7 +232,7 @@ const ServerDashboard = () => {
         throw new Error('Failed to update payment status');
       }
 
-      const statusResponse = await fetch(`http://localhost:5000/api/orders/${orderId}/status`, {
+      const statusResponse = await fetch(buildApiUrl(`/orders/${orderId}/status`), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

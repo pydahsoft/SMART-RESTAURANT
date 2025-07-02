@@ -6,8 +6,9 @@ import {
 import { Edit, Delete, Add } from '@mui/icons-material';
 import SearchIcon from '@mui/icons-material/Search';
 import { PALETTE } from '../themePalette';
+import { buildApiUrl } from '../utils/config';
 
-const API_URL = 'http://localhost:5000/api/menu';
+const API_URL = buildApiUrl('/menu');
 
 const defaultForm = {
   name: '',

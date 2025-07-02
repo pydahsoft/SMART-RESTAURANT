@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { buildApiUrl } from '../utils/config';
 
 const WaiterLogin = () => {
   const navigate = useNavigate();
@@ -26,7 +27,7 @@ const WaiterLogin = () => {
     setIsLoading(true);
 
     try {
-      const response = await axios.post('http://localhost:5000/api/waiters/login', formData);
+      const response = await axios.post(buildApiUrl('/waiters/login'), formData);
       localStorage.setItem('waiterToken', response.data.token);
       localStorage.setItem('waiterInfo', JSON.stringify(response.data.waiter));
       navigate('/waiter-dashboard');

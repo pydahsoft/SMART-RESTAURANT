@@ -19,6 +19,7 @@ import {
   TableBar as TableBarIcon
 } from '@mui/icons-material';
 import { PALETTE } from '../themePalette';
+import { buildApiUrl } from '../utils/config';
 
 // Printable Order Component
 const PrintableOrder = ({ order }) => {
@@ -127,7 +128,7 @@ const ChefDashboard = () => {
 
   const fetchOrders = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/orders/all-orders');
+      const response = await fetch(buildApiUrl('/orders/all-orders'));
       if (!response.ok) throw new Error('Failed to fetch orders');
       const data = await response.json();
       // Filter to show preparing and ready orders
@@ -169,7 +170,7 @@ const ChefDashboard = () => {
         throw new Error('No authentication token found');
       }
 
-      const response = await fetch(`http://localhost:5000/api/orders/${orderId}/status`, {
+      const response = await fetch(buildApiUrl(`/orders/${orderId}/status`), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -202,7 +203,7 @@ const ChefDashboard = () => {
         throw new Error('No authentication token found');
       }
 
-      const response = await fetch(`http://localhost:5000/api/orders/${orderId}/status`, {
+      const response = await fetch(buildApiUrl(`/orders/${orderId}/status`), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

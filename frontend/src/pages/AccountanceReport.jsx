@@ -5,6 +5,7 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { useNavigate } from 'react-router-dom';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { buildApiUrl } from '../utils/config';
 
 const COLORS = {
   orange: '#ff7900',
@@ -38,7 +39,7 @@ const AccountanceReport = () => {
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch('http://localhost:5000/api/orders/all-orders');
+        const response = await fetch(buildApiUrl('/orders/all-orders'));
         if (!response.ok) throw new Error('Failed to fetch orders');
         const data = await response.json();
         if (Array.isArray(data)) {

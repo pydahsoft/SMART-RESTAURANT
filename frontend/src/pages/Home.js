@@ -39,6 +39,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
 import { PALETTE } from '../themePalette';
+import { buildApiUrl } from '../utils/config';
 
 const categories = ['All', 'Starters', 'Main Course', 'Desserts', 'Beverages'];
 const filters = ['Popular', 'New', 'Spicy', 'Vegetarian', 'Recommended'];
@@ -155,7 +156,7 @@ const Home = () => {
   useEffect(() => {
     const fetchFoodItems = async () => {
       try {
-        const response = await axios.get('http://localhost:5000/api/menu');
+        const response = await axios.get(buildApiUrl('/menu'));
         setFoodItems(response.data.map(item => ({
           ...item,
           isNew: Math.random() > 0.7,
