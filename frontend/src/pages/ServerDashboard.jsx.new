@@ -1,0 +1,875 @@
+// Fixed ServerDashboard with proper hook ordering
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Box,
+  Container,
+  Typography,
+  Card,
+  CardContent,
+  Grid,
+  Chip,
+  IconButton,
+  Menu,
+  MenuItem,
+  CircularProgress,
+  Divider,
+  Button,
+  Alert,
+  Snackbar,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  DialogContentText
+} from '@mui/material';
+import QRCode from 'react-qr-code';
+import { useAuth } from '../context/AuthContext';
+import { useWaiterAuth } from '../hooks/useWaiterAuth';
+import {
+  MoreVert as MoreVertIcon,
+  AccessTime as AccessTimeIcon,
+  TableBar as TableBarIcon,
+  Delete as DeleteIcon,
+  Check as CheckIcon,
+  Close as CloseIcon,
+  Visibility as VisibilityIcon
+} from '@mui/icons-material';
+
+const ServerDashboard = () => {
+  // Auth hooks
+  const { token } = useAuth();
+  const { isWaiterMode, waiterInfo, loading: waiterLoading } = useWaiterAuth();
+
+  // State hooks
+  const [orders, setOrders] = useState([]);
+  const [completedOrders, setCompletedOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [orderFilter, setOrderFilter] = useState('all');
+  const [qrError, setQrError] = useState(null);
+  const [qrCodeString, setQrCodeString] = useState(null);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  // Dialog state hooks
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'success'
+  });
+
+  const [paymentDialog, setPaymentDialog] = useState({
+    open: false,
+    orderId: null,
+    amount: 0,
+    tableNumber: null
+  });
+
+  const [upiDialog, setUpiDialog] = useState({
+    open: false,
+    orderId: null,
+    amount: 0,
+    tableNumber: null
+  });
+
+  const [showPaymentConfirmation, setShowPaymentConfirmation] = useState(false);
+
+  // Callback hooks
+  const fetchOrders = useCallback(async () => {
+    if (!token && !isWaiterMode) {
+      setError('Server authentication required');
+      return;
+    }
+
+    try {
+      const authToken = isWaiterMode ? localStorage.getItem('waiterToken') : token;
+      if (!authToken) {
+        throw new Error('Authentication required');
+      }
+
+      let url = 'http://localhost:5000/api/orders';
+      
+      if (isWaiterMode && waiterInfo?.assignedTables) {
+        url += `?tables=${waiterInfo.assignedTables.join(',')}`;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch orders');
+      }
+
+      const data = await response.json();
+      
+      const filteredOrders = data.filter(order => {
+        if (isWaiterMode) {
+          return ['preparing', 'ready'].includes(order.status);
+        } else {
+          return order.status !== 'delivered';
+        }
+      });
+      
+      const sortedOrders = filteredOrders.sort((a, b) => 
+        new Date(b.createdAt) - new Date(a.createdAt)
+      );
+      
+      setOrders(sortedOrders);
+      setError(null);
+    } catch (err) {
+      console.error('Error fetching orders:', err);
+      setError(err.message);
+    }
+  }, [token, isWaiterMode, waiterInfo]);
+
+  const fetchCompletedOrders = useCallback(async () => {
+    if (isWaiterMode) return;
+
+    try {
+      if (!token) {
+        throw new Error('Server authentication required');
+      }
+
+      const response = await fetch('http://localhost:5000/api/orders/completed', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch completed orders');
+      }
+
+      const data = await response.json();
+      const filtered = data
+        .filter(order => order.status === 'completed' && order.paymentStatus === 'completed')
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      
+      setCompletedOrders(filtered);
+    } catch (err) {
+      console.error('Error fetching completed orders:', err);
+    }
+  }, [token, isWaiterMode]);
+
+  const handleStatusUpdate = useCallback(async (orderId, newStatus) => {
+    try {
+      const authToken = isWaiterMode ? localStorage.getItem('waiterToken') : token;
+      if (!authToken) {
+        throw new Error('Authentication required');
+      }
+
+      const response = await fetch(`http://localhost:5000/api/orders/${orderId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ 
+          status: newStatus,
+          comment: `Order ${newStatus} by ${isWaiterMode ? 'waiter' : 'server'}`
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to update order status');
+      }
+
+      if (newStatus === 'delivered') {
+        setOrders(prevOrders => 
+          prevOrders.filter(order => order.orderId !== orderId)
+        );
+      }
+
+      setSnackbar({
+        open: true,
+        message: `Order marked as ${newStatus}`,
+        severity: 'success'
+      });
+
+      await fetchOrders();
+    } catch (error) {
+      console.error('Error updating order status:', error);
+      setSnackbar({
+        open: true,
+        message: error.message || 'Failed to update order status',
+        severity: 'error'
+      });
+    }
+  }, [isWaiterMode, token, fetchOrders]);
+
+  const handlePaymentConfirmation = useCallback(async (confirmed) => {
+    if (!confirmed) {
+      setShowPaymentConfirmation(false);
+      return;
+    }
+
+    setIsProcessingPayment(true);
+    
+    try {
+      const { orderId } = upiDialog;
+      
+      if (!token) {
+        throw new Error('Authentication error. Please log in again.');
+      }
+
+      const paymentResponse = await fetch(`http://localhost:5000/api/orders/${orderId}/payment`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          paymentStatus: 'completed',
+          paymentMethod: 'upi'
+        })
+      });
+
+      if (!paymentResponse.ok) {
+        throw new Error('Failed to update payment status');
+      }
+
+      const statusResponse = await fetch(`http://localhost:5000/api/orders/${orderId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          status: 'completed',
+          comment: 'Payment completed with UPI'
+        })
+      });
+
+      if (!statusResponse.ok) {
+        throw new Error('Failed to update order status');
+      }
+
+      setOrders(prevOrders => 
+        prevOrders.filter(order => order.orderId !== orderId)
+      );
+
+      setSnackbar({
+        open: true,
+        message: 'Payment completed successfully',
+        severity: 'success'
+      });
+
+      setShowPaymentConfirmation(false);
+      setUpiDialog(prev => ({ ...prev, open: false }));
+
+      await fetchOrders();
+      await fetchCompletedOrders();
+
+    } catch (error) {
+      console.error('Error processing payment:', error);
+      setSnackbar({
+        open: true,
+        message: error.message || 'Failed to process payment',
+        severity: 'error'
+      });
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  }, [token, upiDialog, fetchOrders, fetchCompletedOrders]);
+
+  const getFilteredOrders = useCallback(() => {
+    return orders.filter(order => {
+      if (isWaiterMode) {
+        switch (orderFilter) {
+          case 'preparing':
+            return order.status === 'preparing';
+          case 'ready':
+            return order.status === 'ready';
+          default:
+            return true;
+        }
+      } else {
+        switch (orderFilter) {
+          case 'pending':
+            return order.status === 'pending';
+          case 'preparing':
+            return order.status === 'preparing';
+          case 'ready':
+            return order.status === 'ready';
+          default:
+            return true;
+        }
+      }
+    });
+  }, [orders, orderFilter, isWaiterMode]);
+
+  // Effects
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        await Promise.all([
+          fetchOrders(),
+          !isWaiterMode && fetchCompletedOrders()
+        ]);
+      } catch (err) {
+        console.error('Error fetching initial data:', err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, [fetchOrders, fetchCompletedOrders, isWaiterMode]);
+
+  useEffect(() => {
+    if (upiDialog.open && upiDialog.amount && upiDialog.orderId) {
+      try {
+        const upiDetails = {
+          pa: "9010462357@axl",
+          pn: "Happy Birthday",
+          tn: `Order-${upiDialog.orderId}`,
+          am: upiDialog.amount.toString(),
+          cu: "INR"
+        };
+
+        if (!upiDetails.pa || !upiDetails.pn || !upiDetails.am) {
+          throw new Error('Missing required UPI details');
+        }
+
+        const upiUrl = `upi://pay?${Object.entries(upiDetails)
+          .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+          .join('&')}`;
+
+        setQrCodeString(upiUrl);
+        setQrError(null);
+      } catch (error) {
+        setQrError(error.message || 'Failed to generate payment QR code');
+        setQrCodeString(null);
+      }
+    } else {
+      setQrCodeString(null);
+    }
+  }, [upiDialog.open, upiDialog.amount, upiDialog.orderId]);
+
+  // Event handlers
+  const handleMenuClick = (event, order) => {
+    setAnchorEl(event.currentTarget);
+    setSelectedOrder(order);
+  };
+
+  const handleMenuClose = () => {
+    setAnchorEl(null);
+    setSelectedOrder(null);
+  };
+
+  const handleCloseSnackbar = () => {
+    setSnackbar(prev => ({ ...prev, open: false }));
+  };
+
+  const handleCashPayment = (order) => {
+    setPaymentDialog({
+      open: true,
+      orderId: order.orderId,
+      amount: order.totalAmount,
+      tableNumber: order.tableNumber
+    });
+  };
+
+  const handleUpiPayment = useCallback((order) => {
+    setQrError(null);
+    setShowPaymentConfirmation(false);
+    setUpiDialog({
+      open: true,
+      orderId: order.orderId,
+      amount: order.totalAmount,
+      tableNumber: order.tableNumber
+    });
+  }, []);
+
+  const handleCloseUpiDialog = useCallback(() => {
+    if (!isProcessingPayment) {
+      setUpiDialog(prev => ({ ...prev, open: false }));
+      setQrError(null);
+      setQrCodeString(null);
+    }
+  }, [isProcessingPayment]);
+
+  const formatTime = (dateString) => {
+    return new Date(dateString).toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
+
+  // Render functions
+  const renderStatusFilters = () => (
+    <Box sx={{ mb: 3, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+      <Button
+        variant={orderFilter === 'all' ? 'contained' : 'outlined'}
+        onClick={() => setOrderFilter('all')}
+        size="small"
+      >
+        All Orders
+      </Button>
+      {isWaiterMode ? (
+        <>
+          <Button
+            variant={orderFilter === 'preparing' ? 'contained' : 'outlined'}
+            onClick={() => setOrderFilter('preparing')}
+            size="small"
+            color="info"
+          >
+            Preparing ({orders.filter(o => o.status === 'preparing').length})
+          </Button>
+          <Button
+            variant={orderFilter === 'ready' ? 'contained' : 'outlined'}
+            onClick={() => setOrderFilter('ready')}
+            size="small"
+            color="success"
+          >
+            Ready for Delivery ({orders.filter(o => o.status === 'ready').length})
+          </Button>
+        </>
+      ) : (
+        <>
+          <Button
+            variant={orderFilter === 'pending' ? 'contained' : 'outlined'}
+            onClick={() => setOrderFilter('pending')}
+            size="small"
+            color="warning"
+          >
+            Pending ({orders.filter(o => o.status === 'pending').length})
+          </Button>
+          <Button
+            variant={orderFilter === 'preparing' ? 'contained' : 'outlined'}
+            onClick={() => setOrderFilter('preparing')}
+            size="small"
+            color="info"
+          >
+            Preparing ({orders.filter(o => o.status === 'preparing').length})
+          </Button>
+          <Button
+            variant={orderFilter === 'ready' ? 'contained' : 'outlined'}
+            onClick={() => setOrderFilter('ready')}
+            size="small"
+            color="success"
+          >
+            Ready ({orders.filter(o => o.status === 'ready').length})
+          </Button>
+        </>
+      )}
+    </Box>
+  );
+
+  const renderMenuItems = (order) => {
+    if (isWaiterMode) {
+      if (order.status === 'ready') {
+        return (
+          <MenuItem onClick={() => handleStatusUpdate(order.orderId, 'delivered')}>
+            Deliver Order
+          </MenuItem>
+        );
+      }
+      return null;
+    }
+
+    return (
+      <>
+        {order.status === 'pending' && (
+          <>
+            <MenuItem onClick={() => handleAcceptOrder(order.orderId)}>
+              Accept Order
+            </MenuItem>
+            <MenuItem onClick={() => handleRejectOrder(order.orderId)}>
+              Reject Order
+            </MenuItem>
+          </>
+        )}
+        {order.status === 'ready' && order.paymentStatus !== 'completed' && (
+          <>
+            <MenuItem onClick={() => handleCashPayment(order)}>
+              Cash Payment
+            </MenuItem>
+            <MenuItem onClick={() => handleUpiPayment(order)}>
+              UPI Payment
+            </MenuItem>
+          </>
+        )}
+      </>
+    );
+  };
+
+  if (loading) {
+    return (
+      <Container maxWidth="xl" sx={{ py: 4 }}>
+        <Box sx={{ 
+          display: 'flex', 
+          flexDirection: 'column',
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          minHeight: '60vh',
+          gap: 2
+        }}>
+          <CircularProgress size={40} />
+          <Typography variant="body1" color="text.secondary">
+            Loading orders...
+          </Typography>
+        </Box>
+      </Container>
+    );
+  }
+
+  if (error) {
+    return (
+      <Container maxWidth="xl" sx={{ py: 4 }}>
+        <Box sx={{ 
+          p: 3, 
+          textAlign: 'center', 
+          color: 'error.main',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 2
+        }}>
+          <Typography variant="h6">Error: {error}</Typography>
+          <Button 
+            variant="contained" 
+            color="primary" 
+            onClick={() => window.location.reload()}
+          >
+            Retry
+          </Button>
+        </Box>
+      </Container>
+    );
+  }
+
+  const filteredOrders = getFilteredOrders();
+  const noOrders = filteredOrders.length === 0;
+
+  return (
+    <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        mb: 4 
+      }}>
+        <Typography variant="h4">
+          {isWaiterMode ? 'Waiter Dashboard' : 'Server Dashboard'}
+        </Typography>
+        {isWaiterMode ? (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Chip
+              icon={<TableBarIcon />}
+              label={`Assigned Tables: ${waiterInfo?.assignedTables.join(', ')}`}
+              color="primary"
+            />
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={() => {
+                localStorage.removeItem('waiterToken');
+                localStorage.removeItem('waiterInfo');
+                window.location.reload();
+              }}
+            >
+              Logout
+            </Button>
+          </Box>
+        ) : (
+          <Button
+            variant="outlined"
+            color="primary"
+            startIcon={<VisibilityIcon />}
+            onClick={() => setShowCompleted(true)}
+            sx={{ 
+              borderRadius: 2,
+              textTransform: 'none',
+              '&:hover': {
+                backgroundColor: 'primary.light',
+                color: 'primary.contrastText'
+              }
+            }}
+          >
+            Completed Orders {completedOrders.length > 0 && `(${completedOrders.length})`}
+          </Button>
+        )}
+      </Box>
+
+      {renderStatusFilters()}
+
+      {noOrders ? (
+        <Box sx={{ 
+          display: 'flex', 
+          flexDirection: 'column',
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          minHeight: '40vh',
+          gap: 2
+        }}>
+          <Typography variant="h6" color="text.secondary">
+            {orderFilter === 'all' 
+              ? 'No orders available' 
+              : `No ${orderFilter} orders found`}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {isWaiterMode 
+              ? 'Orders assigned to your tables will appear here' 
+              : 'New orders will appear here'}
+          </Typography>
+        </Box>
+      ) : (
+        <Grid container spacing={3}>
+          {filteredOrders.map((order) => (
+            <Grid item xs={12} sm={6} md={4} key={order.orderId}>
+              <Card 
+                sx={{ 
+                  height: '100%',
+                  position: 'relative',
+                  transition: 'all 0.3s ease-in-out',
+                  '&:hover': {
+                    boxShadow: 3,
+                    transform: 'translateY(-2px)'
+                  },
+                  ...(order.status === 'ready' && {
+                    borderLeft: 4,
+                    borderColor: 'success.main'
+                  }),
+                  ...(order.status === 'preparing' && {
+                    borderLeft: 4,
+                    borderColor: 'info.main'
+                  }),
+                  ...(order.status === 'pending' && {
+                    borderLeft: 4,
+                    borderColor: 'warning.main'
+                  })
+                }}
+              >
+                <CardContent>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="h6">
+                      Order #{order.orderId.slice(-6)}
+                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Chip
+                        label={order.status.toUpperCase()}
+                        color={
+                          order.status === 'ready' 
+                            ? 'success' 
+                            : order.status === 'preparing'
+                            ? 'info'
+                            : 'warning'
+                        }
+                        size="small"
+                        sx={{ 
+                          mr: 1,
+                          ...(order.status === 'ready' && {
+                            animation: 'pulse 2s infinite',
+                            '@keyframes pulse': {
+                              '0%': { boxShadow: '0 0 0 0 rgba(76, 175, 80, 0.4)' },
+                              '70%': { boxShadow: '0 0 0 10px rgba(76, 175, 80, 0)' },
+                              '100%': { boxShadow: '0 0 0 0 rgba(76, 175, 80, 0)' }
+                            }
+                          })
+                        }}
+                      />
+                      {!isWaiterMode && (
+                        <IconButton
+                          size="small"
+                          onClick={(e) => handleMenuClick(e, order)}
+                        >
+                          <MoreVertIcon />
+                        </IconButton>
+                      )}
+                    </Box>
+                  </Box>
+                  
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, gap: 1 }}>
+                    <TableBarIcon color="primary" />
+                    <Typography component="div">Table {order.tableNumber}</Typography>
+                    <AccessTimeIcon sx={{ ml: 2 }} fontSize="small" />
+                    <Typography component="div" variant="body2">
+                      {formatTime(order.createdAt)}
+                    </Typography>
+                  </Box>
+
+                  {order.status === 'ready' && (
+                    <Box 
+                      sx={{ 
+                        bgcolor: 'success.light',
+                        color: 'success.dark',
+                        p: 1,
+                        borderRadius: 1,
+                        mb: 2,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '1px solid',
+                        borderColor: 'success.main'
+                      }}
+                    >
+                      <Typography component="div" variant="body2" sx={{ fontWeight: 'medium' }}>
+                        ✓ Order Ready for Service
+                      </Typography>
+                    </Box>
+                  )}
+
+                  <Box sx={{ mb: 2 }}>
+                    {order.items.map((item, idx) => (
+                      <Box 
+                        key={idx} 
+                        sx={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center',
+                          mb: 0.5 
+                        }}
+                      >
+                        <Typography variant="body2">
+                          {item.quantity}x {item.name}
+                        </Typography>
+                        {!isWaiterMode && (
+                          <IconButton 
+                            size="small" 
+                            sx={{ ml: 1 }}
+                            onClick={() => handleStatusUpdate(order.orderId, 'deleted')}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        )}
+                      </Box>
+                    ))}
+                  </Box>
+
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="h6" color="primary">
+                      ₹{order.totalAmount.toFixed(2)}
+                    </Typography>
+                  </Box>
+
+                  <Box sx={{ 
+                    mt: 2, 
+                    mb: 1, 
+                    display: 'flex', 
+                    justifyContent: 'flex-start',
+                    alignItems: 'center'
+                  }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
+                      Payment:
+                    </Typography>
+                    <Chip
+                      label={order.paymentStatus?.toUpperCase() || 'PENDING'}
+                      size="small"
+                      color={order.paymentStatus === 'completed' ? 'success' : 'warning'}
+                      variant="outlined"
+                      sx={{ 
+                        height: '24px',
+                        '& .MuiChip-label': {
+                          fontSize: '0.75rem',
+                          px: 1
+                        }
+                      }}
+                    />
+                  </Box>
+
+                  <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+                    {isWaiterMode ? (
+                      order.status === 'ready' && (
+                        <Button
+                          variant="contained"
+                          color="success"
+                          size="small"
+                          onClick={() => handleStatusUpdate(order.orderId, 'delivered')}
+                          startIcon={<CheckIcon />}
+                        >
+                          Mark as Delivered
+                        </Button>
+                      )
+                    ) : (
+                      <>
+                        {order.status === 'pending' && (
+                          <>
+                            <Button
+                              variant="contained"
+                              color="error"
+                              startIcon={<CloseIcon />}
+                              size="small"
+                              onClick={() => handleStatusUpdate(order.orderId, 'rejected')}
+                            >
+                              Reject
+                            </Button>
+                            <Button
+                              variant="contained"
+                              color="success"
+                              startIcon={<CheckIcon />}
+                              size="small"
+                              onClick={() => handleStatusUpdate(order.orderId, 'preparing')}
+                            >
+                              Accept
+                            </Button>
+                          </>
+                        )}
+                        {order.status === 'ready' && order.paymentStatus !== 'completed' && (
+                          <>
+                            <Button
+                              variant="outlined"
+                              color="success"
+                              size="small"
+                              onClick={() => handleCashPayment(order)}
+                            >
+                              Cash Payment
+                            </Button>
+                            <Button
+                              variant="outlined"
+                              color="info"
+                              size="small"
+                              onClick={() => handleUpiPayment(order)}
+                            >
+                              UPI Payment
+                            </Button>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      )}
+
+      <Menu
+        anchorEl={anchorEl}
+        open={Boolean(anchorEl)}
+        onClose={handleMenuClose}
+      >
+        {selectedOrder && renderMenuItems(selectedOrder)}
+      </Menu>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert 
+          onClose={handleCloseSnackbar} 
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+    </Container>
+  );
+};
+
+export default ServerDashboard;

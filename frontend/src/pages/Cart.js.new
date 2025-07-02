@@ -1,0 +1,617 @@
+import React, { useState } from 'react';
+import {
+  Container,
+  Typography,
+  List,
+  ListItem,
+  ListItemText,
+  IconButton,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Box,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Alert,
+  CircularProgress,
+  useTheme,
+  useMediaQuery,
+  Card,
+  Divider
+} from '@mui/material';
+import { Delete, Add, Remove } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import axios from 'axios';
+import BackButton from '../components/BackButton';
+import { PALETTE } from '../themePalette';
+
+const validatePhoneNumber = (number) => {
+  const phoneRegex = /^\d{10}$/;
+  return phoneRegex.test(number.replace(/[^0-9]/g, ''));
+};
+
+const Cart = () => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const navigate = useNavigate();
+  const { user, login } = useAuth();
+
+  const [cartItems, setCartItems] = useState(() => {
+    const savedCart = sessionStorage.getItem('cart');
+    return savedCart ? JSON.parse(savedCart) : [];
+  });
+
+  const [openDialog, setOpenDialog] = useState(false);
+  const [name, setName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [tableNumber, setTableNumber] = useState(() => {
+    const storedTable = sessionStorage.getItem('tableNumber');
+    return storedTable ? parseInt(storedTable) : 0;
+  });
+
+  const updateCart = (newCart) => {
+    setCartItems(newCart);
+    sessionStorage.setItem('cart', JSON.stringify(newCart));
+  };
+
+  const handleQuantityChange = (itemId, change) => {
+    const newCart = cartItems.map(item => {
+      if (item._id === itemId) {
+        const newQuantity = Math.max(1, item.quantity + change);
+        return { ...item, quantity: newQuantity };
+      }
+      return item;
+    });
+    updateCart(newCart);
+  };
+
+  const handleRemoveItem = (itemId) => {
+    const newCart = cartItems.filter(item => item._id !== itemId);
+    updateCart(newCart);
+  };
+
+  const calculateTotal = () => {
+    return cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
+  };
+
+  const handlePlaceOrder = async () => {
+    if (!tableNumber) {
+      setError('Please select a table number');
+      return;
+    }
+    if (!phoneNumber) {
+      setOpenDialog(true);
+      return;
+    }
+    if (!name && !user?.name) {
+      setOpenDialog(true);
+      return;
+    }
+
+    setError('');
+    setLoading(true);
+
+    try {
+      const orderData = {
+        items: cartItems.map(item => ({
+          foodItem: item._id,
+          quantity: item.quantity,
+          price: item.price
+        })),
+        totalAmount: calculateTotal(),
+        tableNumber: parseInt(tableNumber),
+        phoneNumber,
+        customerName: name || user?.name
+      };
+
+      const response = await axios.post(
+        'http://localhost:5000/api/orders',
+        orderData
+      );
+
+      const { token, user: userInfo, order } = response.data;
+      localStorage.setItem('token', token);
+      await login({
+        _id: userInfo._id,
+        name: userInfo.name,
+        phoneNumber: userInfo.phoneNumber,
+        role: 'customer',
+        orders: [order._id],
+        token
+      });
+
+      sessionStorage.removeItem('cart');
+      navigate('/orders');
+    } catch (error) {
+      console.error('Error placing order:', error);
+      setError(error.response?.data?.message || 'Error placing order');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDirectOrder = async () => {
+    if (!name) {
+      setError('Please enter your name');
+      return;
+    }
+    
+    if (!phoneNumber) {
+      setError('Please enter your phone number');
+      return;
+    }
+
+    if (!validatePhoneNumber(phoneNumber)) {
+      setError('Please enter a valid 10-digit phone number');
+      return;
+    }
+
+    await handlePlaceOrder();
+  };
+
+  if (cartItems.length === 0) {
+    return (
+      <Container 
+        maxWidth="sm" 
+        sx={{ 
+          mt: { xs: 4, sm: 6 }, 
+          textAlign: 'center', 
+          position: 'relative' 
+        }}
+      >
+        <BackButton />
+        <Typography 
+          variant="h5"
+          sx={{ mb: 3, fontSize: { xs: '1.5rem', sm: '1.75rem' } }}
+        >
+          Your cart is empty
+        </Typography>
+        <Button
+          variant="contained"
+          color="primary"
+          size={isMobile ? "medium" : "large"}
+          onClick={() => navigate('/')}
+          sx={{ px: { xs: 3, sm: 4 } }}
+        >
+          Browse Menu
+        </Button>
+      </Container>
+    );
+  }
+
+  return (
+    <Container 
+      maxWidth="md" 
+      sx={{ 
+        mt: { xs: 3, sm: 5 },
+        px: { xs: 2, sm: 3 },
+        position: 'relative'
+      }}
+    >
+      <BackButton />
+      <Typography 
+        variant="h4" 
+        sx={{
+          mb: { xs: 3, sm: 4 },
+          fontSize: { xs: '1.75rem', sm: '2.25rem', md: '2.5rem' },
+          fontWeight: 600,
+          color: 'primary.dark',
+          textAlign: { xs: 'center', sm: 'left' }
+        }}
+      >
+        Place Order
+      </Typography>
+
+      <Card 
+        elevation={0}
+        sx={{ 
+          mb: { xs: 3, sm: 4 },
+          overflow: 'hidden',
+          borderRadius: 3,
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+          transition: 'all 0.3s ease-in-out',
+          '&:hover': {
+            borderColor: 'primary.main',
+            transform: 'translateY(-2px)',
+            boxShadow: (theme) => `0 8px 24px ${theme.palette.primary.main}15`
+          }
+        }}
+      >
+        <List disablePadding>
+          {cartItems.map((item, index) => (
+            <React.Fragment key={item._id}>
+              {index > 0 && <Divider />}
+              <ListItem 
+                sx={{
+                  py: { xs: 3, sm: 3.5 },
+                  px: { xs: 3, sm: 4 },
+                  flexDirection: { xs: 'column', sm: 'row' },
+                  alignItems: { xs: 'stretch', sm: 'center' },
+                  bgcolor: 'background.paper',
+                  borderRadius: 2,
+                  mb: 1,
+                  '&:hover': {
+                    bgcolor: 'primary.50'
+                  },
+                  transition: 'all 0.2s ease-in-out'
+                }}
+              >
+                <ListItemText
+                  primary={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography 
+                        variant="h6"
+                        sx={{
+                          fontSize: { xs: '1.125rem', sm: '1.25rem' },
+                          fontWeight: 600,
+                          color: 'primary.dark'
+                        }}
+                      >
+                        {item.name}
+                      </Typography>
+                    </Box>
+                  }
+                  secondary={
+                    <Typography 
+                      variant="body1" 
+                      sx={{
+                        mt: 0.5,
+                        fontSize: { xs: '1rem', sm: '1.125rem' },
+                        color: 'text.secondary',
+                        fontWeight: 500
+                      }}
+                    >
+                      ${item.price.toFixed(2)} × {item.quantity}
+                    </Typography>
+                  }
+                />
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: { xs: 'space-between', sm: 'flex-end' },
+                    mt: { xs: 2, sm: 0 },
+                    gap: { xs: 1, sm: 2 }
+                  }}
+                >
+                  <Box 
+                    sx={{ 
+                      display: 'flex', 
+                      alignItems: 'center',
+                      bgcolor: 'background.default',
+                      borderRadius: 2,
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      p: 0.5
+                    }}
+                  >
+                    <IconButton 
+                      onClick={() => handleQuantityChange(item._id, -1)}
+                      size="small"
+                      sx={{ 
+                        color: 'primary.main',
+                        '&:hover': { bgcolor: 'primary.50' }
+                      }}
+                    >
+                      <Remove fontSize="small" />
+                    </IconButton>
+                    <Typography 
+                      sx={{ 
+                        mx: { xs: 2, sm: 2.5 },
+                        fontWeight: 600,
+                        color: 'text.primary'
+                      }}
+                    >
+                      {item.quantity}
+                    </Typography>
+                    <IconButton 
+                      onClick={() => handleQuantityChange(item._id, 1)}
+                      size="small"
+                      sx={{ 
+                        color: 'primary.main',
+                        '&:hover': { bgcolor: 'primary.50' }
+                      }}
+                    >
+                      <Add fontSize="small" />
+                    </IconButton>
+                  </Box>
+                  
+                  <Typography 
+                    variant="h6" 
+                    sx={{ 
+                      fontWeight: 600,
+                      minWidth: '90px',
+                      textAlign: 'right',
+                      color: 'primary.main'
+                    }}
+                  >
+                    ${(item.quantity * item.price).toFixed(2)}
+                  </Typography>
+
+                  <IconButton
+                    onClick={() => handleRemoveItem(item._id)}
+                    size="small"
+                    sx={{ 
+                      color: 'error.main',
+                      '&:hover': { 
+                        bgcolor: 'error.50',
+                        transform: 'scale(1.1)'
+                      },
+                      transition: 'all 0.2s ease-in-out'
+                    }}
+                  >
+                    <Delete fontSize="small" />
+                  </IconButton>
+                </Box>
+              </ListItem>
+            </React.Fragment>
+          ))}
+        </List>
+      </Card>
+
+      <Box sx={{ mb: 4 }}>
+        {error && (
+          <Alert 
+            severity="error" 
+            sx={{ mb: 2 }}
+            onClose={() => setError('')}
+          >
+            {error}
+          </Alert>
+        )}
+        
+        <FormControl 
+          fullWidth 
+          sx={{ mb: 3 }}
+        >
+          <InputLabel id="table-number-label">Table Number</InputLabel>
+          <Select
+            labelId="table-number-label"
+            value={tableNumber}
+            label="Table Number"
+            onChange={(e) => setTableNumber(e.target.value)}
+            sx={{
+              '.MuiSelect-select': {
+                py: { xs: 1.5, sm: 2 }
+              }
+            }}
+          >
+            {[...Array(20)].map((_, index) => (
+              <MenuItem key={index + 1} value={index + 1}>
+                Table {index + 1}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <Box 
+          sx={{ 
+            display: 'flex',
+            flexDirection: { xs: 'column', sm: 'row' },
+            justifyContent: 'space-between',
+            alignItems: { xs: 'stretch', sm: 'center' },
+            gap: 3,
+            p: 3,
+            bgcolor: 'primary.50',
+            borderRadius: 3,
+            border: '1px solid',
+            borderColor: 'primary.100'
+          }}
+        >
+          <Box>
+            <Typography 
+              variant="body1"
+              sx={{ 
+                color: 'text.secondary',
+                mb: 0.5,
+                fontWeight: 500
+              }}
+            >
+              Total Amount
+            </Typography>
+            <Typography 
+              variant="h4" 
+              sx={{ 
+                fontSize: { xs: '1.75rem', sm: '2rem' },
+                fontWeight: 700,
+                color: 'primary.dark',
+                letterSpacing: '-0.02em'
+              }}
+            >
+              ${calculateTotal().toFixed(2)}
+            </Typography>
+          </Box>
+          <Button
+            variant="contained"
+            color="primary"
+            size="large"
+            onClick={handlePlaceOrder}
+            disabled={loading}
+            sx={{
+              minWidth: { xs: '100%', sm: '200px' },
+              py: 2,
+              px: 4,
+              borderRadius: 2,
+              fontSize: '1.1rem',
+              fontWeight: 600,
+              boxShadow: 2,
+              '&:hover': {
+                transform: 'translateY(-2px)',
+                boxShadow: 4
+              },
+              transition: 'all 0.2s ease-in-out'
+            }}
+          >
+            {loading ? (
+              <CircularProgress size={24} color="inherit" />
+            ) : (
+              'Place Order'
+            )}
+          </Button>
+        </Box>
+      </Box>
+
+      <Dialog 
+        open={openDialog} 
+        onClose={() => !loading && setOpenDialog(false)}
+        fullWidth
+        maxWidth="xs"
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.1)'
+          }
+        }}
+      >
+        <DialogTitle 
+          sx={{ 
+            p: 3,
+            fontSize: { xs: '1.5rem', sm: '1.75rem' },
+            fontWeight: 700,
+            color: 'primary.dark',
+            textAlign: 'center',
+            borderBottom: '1px solid',
+            borderColor: 'divider'
+          }}
+        >
+          Complete Your Order
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 3 }}>
+          <Typography 
+            variant="body1" 
+            sx={{ 
+              mb: 3, 
+              color: 'text.secondary',
+              textAlign: 'center'
+            }}
+          >
+            Please provide your details to place the order
+          </Typography>
+
+          <TextField
+            autoFocus
+            label="Name"
+            fullWidth
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={loading}
+            sx={{ 
+              mb: 3,
+              '& .MuiOutlinedInput-root': {
+                height: 56,
+                borderRadius: 2,
+                backgroundColor: 'background.paper',
+                '&:hover .MuiOutlinedInput-notchedOutline': {
+                  borderColor: 'primary.main',
+                  borderWidth: '2px'
+                }
+              },
+              '& .MuiInputLabel-root': {
+                fontSize: '1.1rem'
+              }
+            }}
+          />
+
+          <TextField
+            label="Phone Number"
+            fullWidth
+            value={phoneNumber}
+            onChange={(e) => setPhoneNumber(e.target.value)}
+            disabled={loading}
+            sx={{ 
+              '& .MuiOutlinedInput-root': {
+                height: 56,
+                borderRadius: 2,
+                backgroundColor: 'background.paper',
+                '&:hover .MuiOutlinedInput-notchedOutline': {
+                  borderColor: 'primary.main',
+                  borderWidth: '2px'
+                }
+              },
+              '& .MuiInputLabel-root': {
+                fontSize: '1.1rem'
+              }
+            }}
+          />
+        </DialogContent>
+
+        <DialogActions 
+          sx={{ 
+            px: 3, 
+            py: 3, 
+            gap: 2,
+            borderTop: '1px solid',
+            borderColor: 'divider'
+          }}
+        >
+          <Button 
+            onClick={() => setOpenDialog(false)} 
+            disabled={loading}
+            variant="outlined"
+            sx={{
+              flex: 1,
+              py: 1.5,
+              borderRadius: 2,
+              borderColor: 'grey.300',
+              color: 'text.primary',
+              '&:hover': {
+                borderColor: 'grey.400',
+                backgroundColor: 'grey.50'
+              }
+            }}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleDirectOrder}
+            variant="contained" 
+            color="primary"
+            disabled={loading}
+            sx={{
+              flex: 1,
+              py: 1.5,
+              borderRadius: 2,
+              fontSize: '1.1rem',
+              fontWeight: 600,
+              boxShadow: 2,
+              '&:hover': {
+                boxShadow: 4
+              }
+            }}
+          >
+            {loading ? (
+              <CircularProgress size={24} color="inherit" />
+            ) : (
+              'Place Order'
+            )}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Container>
+  );
+};
+
+export default Cart;
+
+// Replace color values in sx and style props with PALETTE values
+// Example changes below:
+// color: '#ff7900' => color: PALETTE.primary
+// bgcolor: 'white' => bgcolor: PALETTE.background
+// borderColor: 'divider' => borderColor: PALETTE.grey
+// color: 'error.light' => color: PALETTE.addButton
+// color: 'text.primary' => color: PALETTE.text
+// color: 'text.secondary' => color: PALETTE.grey
+// backgroundColor: '#F5F5F5' => backgroundColor: PALETTE.card
+// color: '#FFA500' => color: PALETTE.star
+// color: '#E91E63' => color: PALETTE.badge

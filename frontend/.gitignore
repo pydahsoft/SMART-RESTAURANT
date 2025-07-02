@@ -1,0 +1,34 @@
+# Node.js backend
+node_modules/
+.env
+.env.local
+*.log
+
+# React frontend (assuming it's in /client folder)
+client/node_modules/
+client/.env
+client/.env.local
+client/build/
+client/dist/
+
+# Optional: OS and editor junk
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDEs
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Cache
+.cache/
+.pnpm-store/

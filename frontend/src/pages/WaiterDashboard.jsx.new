@@ -1,0 +1,687 @@
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  Box,
+  Container,
+  Typography,
+  Grid,
+  Card,
+  CardContent,
+  Chip,
+  CircularProgress,
+  Alert,
+  Button,
+  Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
+} from '@mui/material';
+import {
+  AccessTime as AccessTimeIcon,
+  Close as CloseIcon,
+  CheckCircle as CheckCircleIcon,
+  PendingActions as PendingIcon,
+  LogoutRounded as LogoutIcon,
+  CurrencyRupee as CurrencyRupeeIcon,
+  QrCode2 as QrCodeIcon
+} from '@mui/icons-material';
+import { QRCodeSVG } from 'qrcode.react';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import { UPI_CONFIG, QR_CONFIG, PAYMENT_VALIDATION } from '../utils/paymentConfig';
+
+const getStatusColor = (status) => {
+  const colors = {
+    pending: 'warning',
+    preparing: 'info',
+    ready: 'success',
+    delivered: 'default',
+    rejected: 'error'
+  };
+  return colors[status] || 'default';
+};
+
+const WaiterDashboard = () => {
+  const navigate = useNavigate();
+  const [orders, setOrders] = useState({ active: [], completed: [], cancelled: [] });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [waiterInfo, setWaiterInfo] = useState(null);
+  const [orderType, setOrderType] = useState('active');
+  const [updatingOrders, setUpdatingOrders] = useState(new Set());
+  const [processingPayment, setProcessingPayment] = useState(new Set());
+  const [upiDialog, setUpiDialog] = useState({
+    open: false,
+    orderId: null,
+    amount: 0,
+    qrString: '',
+    error: ''
+  });
+  const [paymentTimer, setPaymentTimer] = useState(null);
+  const [timeLeft, setTimeLeft] = useState(PAYMENT_VALIDATION.timeoutSeconds);
+
+  const displayedOrders = useMemo(() => {
+    if (!orders) return [];
+    switch (orderType) {
+      case 'active':
+        return orders.active || [];
+      case 'completed':
+        return orders.completed || [];
+      case 'cancelled':
+        return orders.cancelled || [];
+      default:
+        return orders.active || [];
+    }
+  }, [orders, orderType]);
+
+  const orderStats = useMemo(() => {
+    if (!waiterInfo?.statistics) return [];
+    const { statistics } = waiterInfo;
+    return [
+      {
+        label: 'Total Orders',
+        value: statistics.totalOrders,
+        color: 'primary.main'
+      },
+      {
+        label: 'Pending',
+        value: statistics.pendingOrders,
+        color: 'warning.main'
+      },
+      {
+        label: 'Preparing',
+        value: statistics.preparingOrders,
+        color: 'info.main'
+      },
+      {
+        label: 'Ready',
+        value: statistics.readyForDelivery,
+        color: 'success.main'
+      },
+      {
+        label: 'Completed Today',
+        value: statistics.completedToday,
+        color: 'success.dark'
+      }
+    ];
+  }, [waiterInfo]);
+
+  const fetchOrders = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('waiterToken');
+      const waiterData = localStorage.getItem('waiterInfo');
+      
+      if (!token || !waiterData) {
+        console.error('No token or waiter info found');
+        setError('Authentication required. Please log in again.');
+        setTimeout(() => navigate('/waiter-login'), 2000);
+        return;
+      }
+
+      const response = await axios.get(
+        'http://localhost:5000/api/waiters/my-orders',
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+
+      const { orders, statistics, assignedTables } = response.data;
+      setOrders(orders); // orders object contains { active, completed, cancelled }
+      setWaiterInfo(prev => ({
+        ...prev,
+        assignedTables,
+        statistics
+      }));
+      setError('');
+    } catch (err) {
+      console.error('Error fetching orders:', err);
+      const errorMessage = err.response?.data?.message || 'Failed to fetch orders';
+      setError(errorMessage);
+      
+      if (err.response?.status === 401) {
+        localStorage.removeItem('waiterToken');
+        localStorage.removeItem('waiterInfo');
+        setTimeout(() => navigate('/waiter-login'), 2000);
+      }
+      
+      setOrders({ active: [], completed: [], cancelled: [] });
+    } finally {
+      setLoading(false);
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    const waiterData = localStorage.getItem('waiterInfo');
+    if (waiterData) {
+      try {
+        const parsedData = JSON.parse(waiterData);
+        setWaiterInfo(parsedData);
+      } catch (err) {
+        console.error('Error parsing waiter info:', err);
+        localStorage.removeItem('waiterInfo');
+        navigate('/waiter-login');
+      }
+    } else {
+      navigate('/waiter-login');
+    }
+
+    fetchOrders();
+    const interval = setInterval(fetchOrders, 30000); // Poll every 30 seconds
+    return () => clearInterval(interval);
+  }, [fetchOrders, navigate]);
+
+  const handleLogout = () => {
+    localStorage.removeItem('waiterToken');
+    localStorage.removeItem('waiterInfo');
+    navigate('/waiter-login');
+  };
+
+  const handleCloseUpiDialog = useCallback(() => {
+    if (paymentTimer) {
+      clearInterval(paymentTimer);
+    }
+    setPaymentTimer(null);
+    setTimeLeft(PAYMENT_VALIDATION.timeoutSeconds);
+    setUpiDialog({
+      open: false,
+      orderId: null,
+      amount: 0,
+      qrString: '',
+      error: ''
+    });
+  }, [paymentTimer]);
+
+  const handleStatusUpdate = useCallback(async (orderId, newStatus) => {
+    setUpdatingOrders(prev => new Set([...prev, orderId]));
+    try {
+      const token = localStorage.getItem('waiterToken');
+      await axios.patch(
+        `http://localhost:5000/api/orders/${orderId}/status`,
+        {
+          status: newStatus,
+          comment: `Order ${newStatus} by waiter`
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+      
+      // Optimistic update
+      setOrders(prevOrders => {
+        const updatedOrders = { ...prevOrders };
+        
+        // Remove from current status group
+        Object.keys(updatedOrders).forEach(key => {
+          updatedOrders[key] = updatedOrders[key].filter(order => order._id !== orderId);
+        });
+        
+        // Add to new status group
+        const order = Object.values(prevOrders)
+          .flat()
+          .find(order => order._id === orderId);
+          
+        if (order) {
+          const updatedOrder = { ...order, status: newStatus };
+          if (newStatus === 'completed' || newStatus === 'delivered') {
+            updatedOrders.completed = [...(updatedOrders.completed || []), updatedOrder];
+          } else if (newStatus === 'cancelled') {
+            updatedOrders.cancelled = [...(updatedOrders.cancelled || []), updatedOrder];
+          } else {
+            updatedOrders.active = [...(updatedOrders.active || []), updatedOrder];
+          }
+        }
+        
+        return updatedOrders;
+      });
+
+      await fetchOrders(); // Refresh to ensure sync
+    } catch (err) {
+      setError(err.response?.data?.message || `Failed to update order status`);
+      await fetchOrders(); // Refresh in case of error
+    } finally {
+      setUpdatingOrders(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(orderId);
+        return newSet;
+      });
+    }
+  }, [fetchOrders]);
+
+  const handlePayment = useCallback(async (orderId, paymentMethod) => {
+    setProcessingPayment(prev => new Set([...prev, orderId]));
+    try {
+      const token = localStorage.getItem('waiterToken');
+      await axios.patch(
+        `http://localhost:5000/api/orders/${orderId}/payment`,
+        {
+          paymentMethod,
+          paymentStatus: 'completed'
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+      
+      // After successful payment, update order status to completed
+      await handleStatusUpdate(orderId, 'completed');
+    } catch (err) {
+      setError(err.response?.data?.message || `Failed to process payment`);
+    } finally {
+      setProcessingPayment(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(orderId);
+        return newSet;
+      });
+    }
+  }, [handleStatusUpdate]);
+
+  const validatePayment = useCallback((amount) => {
+    if (amount < PAYMENT_VALIDATION.minimumAmount) {
+      return {
+        isValid: false,
+        message: `Amount must be at least ₹${PAYMENT_VALIDATION.minimumAmount}`
+      };
+    }
+    if (amount > PAYMENT_VALIDATION.maximumAmount) {
+      return {
+        isValid: false,
+        message: `Amount cannot exceed ₹${PAYMENT_VALIDATION.maximumAmount}`
+      };
+    }
+    return { isValid: true, message: '' };
+  }, []);
+
+  const handleUpiPaymentClick = useCallback((orderId, amount) => {
+    try {
+      const validation = validatePayment(amount);
+      if (!validation.isValid) {
+        setUpiDialog({
+          open: true,
+          orderId,
+          amount,
+          qrString: '',
+          error: validation.message
+        });
+        return;
+      }
+
+      const upiDetails = {
+        pa: UPI_CONFIG.merchantId,
+        pn: UPI_CONFIG.merchantName,
+        tr: `${UPI_CONFIG.terminalId}-${orderId}`,
+        tn: `Order #${orderId}`,
+        am: amount.toString(),
+        cu: "INR",
+        mc: UPI_CONFIG.merchantCategory
+      };
+
+      const upiUrl = `upi://pay?${Object.entries(upiDetails)
+        .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+        .join('&')}`;
+
+      setUpiDialog({
+        open: true,
+        orderId,
+        amount,
+        qrString: upiUrl,
+        error: ''
+      });
+
+      const timer = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            handleCloseUpiDialog();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      setPaymentTimer(timer);
+    } catch (error) {
+      setUpiDialog({
+        open: true,
+        orderId,
+        amount,
+        qrString: '',
+        error: 'Failed to generate QR code'
+      });
+    }
+  }, [validatePayment, handleCloseUpiDialog]);
+
+  const handlePaymentConfirm = useCallback(async (orderId, paymentMethod) => {
+    if (paymentMethod === 'upi') {
+      handleCloseUpiDialog();
+    }
+    await handlePayment(orderId, paymentMethod);
+  }, [handlePayment, handleCloseUpiDialog]);
+
+  useEffect(() => {
+    return () => {
+      if (paymentTimer) {
+        clearInterval(paymentTimer);
+      }
+    };
+  }, [paymentTimer]);
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  return (
+    <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Order Type Filters */}
+      <Box sx={{ mb: 4 }}>
+        <Grid container spacing={2}>
+          <Grid item>
+            <Button
+              variant={orderType === 'active' ? 'contained' : 'outlined'}
+              onClick={() => setOrderType('active')}
+              startIcon={<PendingIcon />}
+            >
+              Active Orders ({orders.active?.length || 0})
+            </Button>
+          </Grid>
+          <Grid item>
+            <Button
+              variant={orderType === 'completed' ? 'contained' : 'outlined'}
+              onClick={() => setOrderType('completed')}
+              startIcon={<CheckCircleIcon />}
+            >
+              Completed ({orders.completed?.length || 0})
+            </Button>
+          </Grid>
+          <Grid item>
+            <Button
+              variant={orderType === 'cancelled' ? 'contained' : 'outlined'}
+              onClick={() => setOrderType('cancelled')}
+              startIcon={<CloseIcon />}
+            >
+              Cancelled ({orders.cancelled?.length || 0})
+            </Button>
+          </Grid>
+        </Grid>
+      </Box>
+
+      {/* Statistics Cards */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        {orderStats.map((stat, index) => (
+          <Grid item xs={12} sm={6} md={3} key={index}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" color="text.secondary">
+                  {stat.label}
+                </Typography>
+                <Typography variant="h3" sx={{ color: stat.color }}>
+                  {stat.value}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+        ))}
+      </Grid>
+
+      {/* Orders List */}
+      {displayedOrders.length === 0 ? (
+        <Box sx={{ textAlign: 'center', py: 4 }}>
+          <Typography variant="h6" color="text.secondary">
+            No {orderType} orders found
+          </Typography>
+        </Box>
+      ) : (
+        <Grid container spacing={3}>
+          {displayedOrders.map((order) => (
+            <Grid item xs={12} md={6} key={order._id}>
+              <Card>
+                <CardContent>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+                    <Typography variant="h6">
+                      Table {order.tableNumber}
+                    </Typography>
+                    <Chip
+                      label={order.status.toUpperCase()}
+                      color={getStatusColor(order.status)}
+                    />
+                  </Box>
+                  
+                  <Box sx={{ mb: 2 }}>
+                    {order.items.map((item, index) => (
+                      <Typography key={index}>
+                        {item.quantity}x {item.foodItem.name} - ₹{item.foodItem.price * item.quantity}
+                      </Typography>
+                    ))}
+                  </Box>
+                  
+                  <Divider sx={{ my: 2 }} />
+                  
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="subtitle1" fontWeight="bold">
+                      Total: ₹{order.totalAmount}
+                    </Typography>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center' }}>
+                        <AccessTimeIcon sx={{ fontSize: '1rem', mr: 0.5 }} />
+                        {new Date(order.createdAt).toLocaleTimeString()}
+                      </Typography>
+                    </Box>
+                  </Box>
+
+                  {orderType === 'active' && (
+                    <Box sx={{ mt: 2, display: 'flex', gap: 1, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      {order.status === 'pending' && (
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="info"
+                          onClick={() => handleStatusUpdate(order._id, 'preparing')}
+                          disabled={updatingOrders.has(order._id)}
+                          startIcon={updatingOrders.has(order._id) ? <CircularProgress size={16} /> : null}
+                        >
+                          Start Preparing
+                        </Button>
+                      )}
+                      
+                      {order.status === 'preparing' && (
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="info"
+                          onClick={() => handleStatusUpdate(order._id, 'ready')}
+                          disabled={updatingOrders.has(order._id)}
+                          startIcon={updatingOrders.has(order._id) ? <CircularProgress size={16} /> : null}
+                        >
+                          Mark Ready
+                        </Button>
+                      )}
+
+                      {order.status === 'ready' && (
+                        <>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="success"
+                            onClick={() => handleStatusUpdate(order._id, 'served')}
+                            disabled={updatingOrders.has(order._id)}
+                            startIcon={updatingOrders.has(order._id) ? <CircularProgress size={16} /> : <CheckCircleIcon />}
+                          >
+                            Mark Served
+                          </Button>
+                        </>
+                      )}
+
+                      {order.status === 'served' && !order.paymentStatus && (
+                        <>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="primary"
+                            onClick={() => handleUpiPaymentClick(order._id, order.totalAmount)}
+                            disabled={processingPayment.has(order._id)}
+                            startIcon={processingPayment.has(order._id) ? <CircularProgress size={16} /> : <QrCodeIcon />}
+                          >
+                            Pay with UPI
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="primary"
+                            onClick={() => handlePaymentConfirm(order._id, 'cash')}
+                            disabled={processingPayment.has(order._id)}
+                            startIcon={processingPayment.has(order._id) ? <CircularProgress size={16} /> : <CurrencyRupeeIcon />}
+                          >
+                            Pay with Cash
+                          </Button>
+                        </>
+                      )}
+
+                      {!['served', 'completed'].includes(order.status) && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="error"
+                          onClick={() => handleStatusUpdate(order._id, 'cancelled')}
+                          disabled={updatingOrders.has(order._id)}
+                          startIcon={updatingOrders.has(order._id) ? <CircularProgress size={16} /> : <CloseIcon />}
+                        >
+                          Cancel
+                        </Button>
+                      )}
+                    </Box>
+                  )}
+
+                  {/* Show payment status if available */}
+                  {order.paymentStatus && (
+                    <Box sx={{ mt: 2 }}>
+                      <Chip
+                        label={`Paid (${order.paymentMethod?.toUpperCase() || 'Unknown'})`}
+                        color="success"
+                        size="small"
+                      />
+                    </Box>
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      )}
+
+      {/* Logout Button */}
+      <Box sx={{ mt: 4, display: 'flex', justifyContent: 'center' }}>
+        <Button
+          variant="outlined"
+          color="error"
+          startIcon={<LogoutIcon />}
+          onClick={handleLogout}
+        >
+          Logout
+        </Button>
+      </Box>
+
+      {/* Enhanced UPI Payment Dialog */}
+      <Dialog 
+        open={upiDialog.open} 
+        onClose={handleCloseUpiDialog}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+            p: 2
+          }
+        }}
+      >
+        <DialogTitle sx={{ textAlign: 'center', pb: 0 }}>
+          Pay with UPI
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ 
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 2,
+            py: 2
+          }}>
+            {upiDialog.error ? (
+              <Alert severity="error" sx={{ width: '100%' }}>{upiDialog.error}</Alert>
+            ) : (
+              <>
+                <QRCodeSVG 
+                  value={upiDialog.qrString} 
+                  size={QR_CONFIG.size}
+                  level={QR_CONFIG.level}
+                  includeMargin={QR_CONFIG.includeMargin}
+                  imageSettings={QR_CONFIG.imageSettings}
+                />
+                <Typography variant="h5" color="primary" sx={{ fontWeight: 'bold' }}>
+                  Amount: ₹{upiDialog.amount.toFixed(2)}
+                </Typography>
+                <Typography variant="body1" color="text.secondary" sx={{ textAlign: 'center' }}>
+                  Scan with any UPI app to pay
+                </Typography>
+                <Typography variant="caption" color="warning.main">
+                  Time remaining: {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+                </Typography>
+                <Grid container spacing={2} justifyContent="center">
+                  {UPI_CONFIG.supportedApps.map((app) => (
+                    <Grid item key={app.name}>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={() => {
+                          window.location.href = `${app.scheme}://${upiDialog.qrString}`;
+                        }}
+                      >
+                        {app.name}
+                      </Button>
+                    </Grid>
+                  ))}
+                </Grid>
+              </>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'space-between', px: 3, pb: 2 }}>
+          <Button 
+            onClick={handleCloseUpiDialog} 
+            color="inherit"
+            variant="outlined"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={() => handlePaymentConfirm(upiDialog.orderId, 'upi')}
+            color="primary"
+            variant="contained"
+            disabled={processingPayment.has(upiDialog.orderId)}
+            sx={{ minWidth: 150 }}
+          >
+            {processingPayment.has(upiDialog.orderId) ? (
+              <CircularProgress size={24} />
+            ) : (
+              'Confirm Payment'
+            )}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Container>
+  );
+};
+
+export default WaiterDashboard;
